@@ -34,3 +34,7 @@ nosetests.xml
 .mr.developer.cfg
 .project
 .pydevproject
+
+GeoIP.dat
+run_selectproxy.sh
+*.log
