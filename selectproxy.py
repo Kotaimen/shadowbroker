@@ -3,71 +3,89 @@
 
 import socket
 import logging
+import json
 
+
+# apt-get install python-geoip
 # brew install libgeoip && pip install GeoIP
 import GeoIP
 
-##
-# Magic variables
-##
 
+#===============================================================================
+# Read data
+#===============================================================================
+
+# GeoIP2 seems doesn't work
+# Get GeoIP from
 # http://geolite.maxmind.com/download/geoip/database/GeoLiteCountry/GeoIP.dat.gz
-GEOIP_DB = GeoIP.open('GeoIP.dat', GeoIP.GEOIP_MEMORY_CACHE)
+GEOIP_DB = GeoIP.open('data/GeoIP.dat', GeoIP.GEOIP_MEMORY_CACHE)
 
-BLACKLIST_IP = frozenset(['60.191.124.236', '180.168.41.175', '93.46.8.89',
-'203.98.7.65', '8.7.198.45', '78.16.49.15', '46.82.174.68', '243.185.187.39',
-'243.185.187.30', '159.106.121.75', '37.61.54.158', '59.24.3.173',
-])
+with open('data/ip_blacklist.txt') as fp:
+    BLACKLIST_IP = frozenset(line.strip() for line in fp if line.strip())
 
-BLACKLIST_DOMAIN = frozenset(['skype.com', 'youtube.com'])
+with open('data/domain_blacklist.txt') as fp:
+    BLACKLIST_DOMAIN = frozenset(line.strip() for line in fp if line.strip())
 
 WHITELIST_DOMAIN = frozenset(['local', 'localhost'])
 
+#===============================================================================
+# Magic variables
+#===============================================================================
+
 
 def ip2int(ip):
-    return reduce(lambda x,y: x * 256 + y, map(int, ip.split('.')))
-    
+    return reduce(lambda x, y: x * 256 + y, map(int, ip.split('.')))
+
+
 def is_ip_local(ip):
     ip = ip2int(ip)
     ip >>= 16
-    if ip == 0xc0a8: 
+    if ip == 0xc0a8:
         # 192.168.0.0~192.168.255.255
         return True
     ip >>= 4
-    if ip == 0xac1: 
+    if ip == 0xac1:
         # 172.16.0.0~172.31.255.255
         return True
     ip >>= 4
-    if ip == 0x7f or ip == 0xa: 
+    if ip == 0x7f or ip == 0xa:
         # 127.0.0.0~127.255.255.255/10.0.0.0~10.255.255.255
         return True
-    
+
     return False
-    
-def is_ip_gfwed(ip):    
+
+
+def is_ip_gfwed(ip):
     return ip in BLACKLIST_IP
-    
-def get_geo_ip(ip):    
+
+
+def get_geo_ip(ip):
     try:
         return GEOIP_DB.country_code_by_addr(ip)
     except Exception:
         return 'UNKNOWN'
-    
-    
+
+
 def is_host_local(host):
     return host in WHITELIST_DOMAIN
-    
+
+
 def is_host_gfwed(host):
     return host in BLACKLIST_DOMAIN
+
+
+#===============================================================================
+# Proxy Selector
+#===============================================================================
 
 
 def select_proxy(host):
     """ Decide which proxy to use for given hostname.
     Returns: LOCAL/DOMESTIC/OVERSEA
     """
-    
+
     if is_host_local(host):
-        return 'LOCAL'        
+        return 'LOCAL'
     elif is_host_gfwed(host):
         return 'OVERSEA'
 
@@ -76,21 +94,23 @@ def select_proxy(host):
     except Exception:
         logging.exception('host "%s" not resolved', host)
         return 'LOCAL'
-    
+
     if is_ip_local(ip):
-        return 'LOCAL'        
+        return 'LOCAL'
     elif is_ip_gfwed(ip):
         return 'OVERSEA'
 
     country = get_geo_ip(ip)
     if country == 'UNKNOWN':
-        logging.error('unknown geoip for "%s"', ip)        
+        logging.error('unknown geoip for "%s"', ip)
         return 'LOCAL'
-    
+
     if country == 'CN':
         return 'DOMESTIC'
     else:
         return 'OVERSEA'
 
+
 if __name__ == '__main__':
+    print get_geo_ip('4.4.4.4')
     print get_geo_ip('173.194.127.165')
