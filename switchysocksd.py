@@ -1,22 +1,32 @@
+
 #!/usr/bin/env python
 
-import gevent
-import gevent.monkey
-gevent.monkey.patch_all()
+import eventlet
+eventlet.monkey_patch()
+from eventlet.green import socket
+from eventlet.green import select
 
-# import eventlet
-# eventlet.monkey_patch()
-
-import json
-import socket
-import select
-import SocketServer
 import struct
 import logging
+import contextlib
+import json
 
 import selectproxy
 
+#===============================================================================
+# Config
+#===============================================================================
+
 CONFIG = json.load(open('config.json'))
+
+
+def lookup_upstream(proxy):
+    return (CONFIG['upstreams'][proxy]['addr'],
+            CONFIG['upstreams'][proxy]['port'])
+
+#===============================================================================
+# SOCKS5 Handler
+#===============================================================================
 
 
 def send_all(sock, data):
@@ -30,107 +40,107 @@ def send_all(sock, data):
             return bytes_sent
 
 
-def lookup_upstream(proxy):
-    return (CONFIG['upstreams'][proxy]['addr'], CONFIG['upstreams'][proxy]['port'])
+def handle_socks5(sock, address):
+    with contextlib.closing(sock):
+        rfile = sock.makefile('r')
 
-class TCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):    
-    allow_reuse_address = True
+        # === Handshake
+        sock.recv(262)  # XXX: why 262?
+        sock.sendall(b'\x05\x00')  # SOCKS5, no auth
+        data = rfile.read(4)
+        command = ord(data[1])
 
-class Socks5Handler(SocketServer.StreamRequestHandler):
-    
-    def handle(self):
-        try:
-            self.do_handle()
-        except socket.error:
-            logging.exception('Socket Error')
-        except Exception:
-            logging.exception('Unexpected Error')
-    
-    def do_handle(self):
-        sock = self.connection
-        # 1. Version
-        sock.recv(262)
-        sock.sendall(b"\x05\x00");
-        # 2. Request
-        data = self.rfile.read(4)
-        mode = ord(data[1])
         addrtype = ord(data[3])
-        if addrtype == 1:       # IPv4
-            addr = socket.inet_ntoa(self.rfile.read(4))
-        elif addrtype == 3:     # Domain name
-            addr = self.rfile.read(ord(sock.recv(1)[0]))
-        port = struct.unpack('>H', self.rfile.read(2))
+        if addrtype == 1:  # IPv4
+            addr = socket.inet_ntoa(rfile.read(4))
+        elif addrtype == 3:  # Domain name
+            addr = rfile.read(ord(sock.recv(1)[0]))
+        port = struct.unpack('>H', rfile.read(2))
+
+        if command != 1:
+            reply = b"\x05\x07\x00\x01"  # Command not supported
+            sock.sendall(reply)
+            logging.error('Only supports SOCKS no auth')
+            return
+
         reply = b"\x05\x00\x00\x01"
+        logging.info('Accepted %r ==> %s:%d', address, addr, port[0],)
+
+        # ==== Connecting
         try:
-            if mode == 1:  # 1. Tcp connect
-                remote = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                proxy = selectproxy.select_proxy(addr)
-                logging.debug('Host "%s" is %s', addr, proxy)
-                if proxy in ('LOCAL', 'DOMESTIC'):
-                    logging.info('Direct connect to %s:%d', addr, port[0])
-                    remote.connect((addr, port[0]))
-                    local = remote.getsockname()
-                    reply += socket.inet_aton(local[0]) + struct.pack(">H", local[1])
-                else:
-                    logging.info('Proxy %s to %s:%d', proxy, addr, port[0])
-                    remote.connect(lookup_upstream(proxy))
-                    local = remote.getsockname()
-                    reply += socket.inet_aton(local[0]) + struct.pack(">H", local[1])
-                    remote.sendall(b"\x05\x01\x00")
-                    data = remote.recv(262)
-                    if addrtype == 1:
-                        tosend = b"\x05\x01\x00\x01" + socket.inet_aton(addr)
-                    elif addrtype == 3:
-                        tosend = b"\x05\x01\x00\x03"+struct.pack('B', len(addr)) + bytes(addr)
-                        tosend += struct.pack('>H', port[0])
-                        logging.debug('Sending "%r"' %tosend)
-                    remote.sendall(tosend)
-                    data = remote.recv(262)
-                    logging.debug("Data len: %i", len(data))
- 
+            remote = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            remote.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            proxy = selectproxy.select_proxy(addr)
+            logging.debug('Connecting to "%s" via "%s"', addr, proxy)
+
+            if proxy in ('LOCAL', 'DOMESTIC'):
+                # Local connection
+                remote.connect((addr, port[0]))
+                local = remote.getsockname()
+                logging.info('Direct connect %r ==> %s%r ==> %s:%d', address, proxy, local, addr, port[0])
+                reply += socket.inet_aton(local[0]) + struct.pack(">H", local[1])
             else:
-                reply = b"\x05\x07\x00\x01" # Command not supported
+                # Upstream SOCKS5
+                remote.connect(lookup_upstream(proxy))
+                local = remote.getsockname()
+                logging.info('Proxy connect %r ==> %s%r ==> %s:%d', address, proxy, local, addr, port[0])
+                reply += socket.inet_aton(local[0]) + struct.pack(">H", local[1])
+                remote.sendall(b"\x05\x01\x00")
+                data = remote.recv(262)
+                if addrtype == 1:
+                    tosend = b"\x05\x01\x00\x01" + socket.inet_aton(addr)
+                elif addrtype == 3:
+                    tosend = b"\x05\x01\x00\x03" + struct.pack('B', len(addr)) + bytes(addr)
+                    tosend += struct.pack('>H', port[0])
+                    # logging.debug('Sending "%r"' % tosend)
+                remote.sendall(tosend)
+                data = remote.recv(262)
+                # logging.debug("# len: %i", len(data))
         except socket.error:
             # Connection refused
             reply = '\x05\x05\x00\x01\x00\x00\x00\x00\x00\x00'
-            
-        sock.sendall(reply)
-        
-        # 3. Transfering
-        if reply[1] == '\x00':  # Success
-            if mode == 1:    # 1. Tcp connect
-                self.do_handle_tcp(sock, remote)
 
-    def do_handle_tcp(self, sock, remote):
-        fdset = [sock, remote]
-        while True:
-            r, w, e = select.select(fdset, [], [])
-            if sock in r:
-                data = sock.recv(4096)
-                if len(data) <= 0:
-                    logging.error('Read error from sock')
-                    break
-                elif send_all(remote, data) < len(data):
-                    logging.error('Send error to remote')
-                    break
-            if remote in r:
-                data = remote.recv(4096)
-                if len(data) <= 0:
-                    logging.error("Read error from remote, len = %i" % len(data))
-                    break
-                elif send_all(sock, data) < len(data):
-                    logging.error("Send error to sock")
-                    break                
-                
+        sock.sendall(reply)
+
+        # ==== Transfering
+        if reply[1] != '\x00' or command != 1:
+            remote.close()
+            return
+
+        with contextlib.closing(remote):
+
+            total_sent, total_read = 0, 0
+            while True:
+                rlist, _wlist, _xlist = select.select([sock, remote], [], [])
+                if sock in rlist:
+                    data = sock.recv(4096)  # XXX: inefficient... use recv_into?
+                    if not data:
+                        break
+                    sent = send_all(remote, data)
+                    total_sent += sent
+                    if sent < len(data):
+                        break
+                if remote in rlist:
+                    data = remote.recv(4096)
+                    if not data:
+                        break
+                    read = send_all(sock, data)
+                    total_read += read
+                    if read < len(data):
+                        break
+            logging.info('Connection closed, %d bytes read, %d bytes sent', total_read, total_sent)
+
+
 def main():
-    logging.basicConfig(level=logging.DEBUG, 
-    # filename='socks.log', filemode='a'
-    )
-    logging.debug('Config %r', CONFIG)
-        
-    server = TCPServer((CONFIG['addr'], CONFIG['port']), Socks5Handler)
-    server.serve_forever()
+    logging.info(CONFIG)
+    server = eventlet.listen((CONFIG['addr'], CONFIG['port']))
+    pool = eventlet.GreenPool(100)
+
+    while True:
+        new_sock, address = server.accept()
+        pool.spawn_n(handle_socks5, new_sock, address)
+
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG)
     main()
-
