@@ -1,0 +1,7 @@
+skype.com
+google.com
+facebook.com
+youtube.com
+twitter.com
+mail.google.com
+gmail.com
