@@ -152,9 +152,7 @@ class TCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
 
 def main():
-    logging.basicConfig(level=logging.DEBUG,
-#                         filename='socks.log', filemode='a'
-                        )
+    logging.basicConfig(level=logging.DEBUG, filename='socks.log', filemode='a')
     print 'switchysocksd'
     pprint.pprint(CONFIG)
 
