@@ -128,7 +128,6 @@ class Socks5Handler(SocketServer.StreamRequestHandler):
         else:
             logging.info('Connection %s:%r closed, %d bytes read, %d bytes sent',
                 client_address[0], client_address[1],
-                addr, port[0],
                 total_read, total_sent)
         finally:
             remote.close()
