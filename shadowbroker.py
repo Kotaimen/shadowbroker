@@ -167,9 +167,9 @@ class TCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 def main():
     format = '%(asctime)-15s %(name)s %(levelname)s %(message)s'
     logging.basicConfig(level=logging.INFO,
-        # filename='socks.log', filemode='a'
-        format=format
-        )
+        filename='socks.log', filemode='a',
+        format=format)
+
     print 'Listening on %s:%d' % (CONFIG['addr'], CONFIG['port'])
     print 'Config:'
     pprint.pprint(CONFIG)
