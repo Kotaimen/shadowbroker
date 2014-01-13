@@ -48,15 +48,21 @@ class Socks5Handler(SocketServer.StreamRequestHandler):
             self.do_handle()
         except Exception:
             logging.exception('Unexpected error')
+        finally:
+            self.connection.close()
 
     def do_handle(self):
         sock = self.connection
         client_address = self.client_address
+        logging.info('Connected from %s:%d', *client_address)
         # 1. Version
         sock.recv(262)
         sock.sendall(b"\x05\x00");
         # 2. Request
         data = self.rfile.read(4)
+        if not data:
+            logging.error("Aborted: %s:%d didn't say anyting", *client_address)
+            return
         mode = ord(data[1])
         addrtype = ord(data[3])
         if addrtype == 1:  # IPv4
@@ -72,27 +78,31 @@ class Socks5Handler(SocketServer.StreamRequestHandler):
             return
 
         reply = b"\x05\x00\x00\x01"
-        logging.info('Accepted %r ==> %s:%d', client_address, addr, port[0],)
+        logging.info('Accepted  %s:%d => %s:%d', client_address[0],
+                     client_address[1], addr, port[0],)
 
+        # Open upstream
+        remote = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        remote.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
-            # Open upstream
-            remote = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            remote.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-
             proxy = selectproxy.select_proxy(addr)
             logging.debug('Host "%s" is %s', addr, proxy)
             if proxy in ('LOCAL', 'DOMESTIC'):
                 remote.connect((addr, port[0]))
                 local = remote.getsockname()
-                logging.info('Direct connect %r ==> %s%r ==> %s:%d',
-                             client_address, proxy, local, addr, port[0])
+                logging.info('Direct %s:%d => %s %s:%d => %s:%d',
+                             client_address[0], client_address[1],
+                             proxy, local[0], local[1],
+                             addr, port[0])
                 reply += socket.inet_aton(local[0]) + struct.pack(">H", local[1])
                 sock.sendall(reply)
             else:
                 remote.connect(lookup_upstream(proxy))
                 local = remote.getsockname()
-                logging.info('Proxy connect %r ==> %s%r ==> %s:%d',
-                             client_address, proxy, local, addr, port[0])
+                logging.info('Proxy %s:%d => %s %s:%d => %s:%d',
+                             client_address[0], client_address[1],
+                             proxy, local[0], local[1],
+                             addr, port[0])
                 reply += socket.inet_aton(local[0]) + struct.pack(">H", local[1])
                 remote.sendall(b"\x05\x01\x00")
                 data = remote.recv(262)
@@ -112,9 +122,14 @@ class Socks5Handler(SocketServer.StreamRequestHandler):
 
         # 3. Transfering
         try:
-            self.do_handle_tcp(sock, remote)
+            total_sent, total_read = self.do_handle_tcp(sock, remote)
         except socket.error:
             logging.exception('Socket error while tranfering')
+        else:
+            logging.info('Connection %s:%r closed, %d bytes read, %d bytes sent',
+                client_address[0], client_address[1],
+                addr, port[0],
+                total_read, total_sent)
         finally:
             remote.close()
 
@@ -138,8 +153,7 @@ class Socks5Handler(SocketServer.StreamRequestHandler):
                 total_read += read
                 if read < len(data):
                     break
-        logging.info('Connection closed, %d bytes read, %d bytes sent',
-                     total_read, total_sent)
+        return total_sent, total_read
 
 
 #===============================================================================
@@ -152,8 +166,13 @@ class TCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
 
 def main():
-    logging.basicConfig(level=logging.DEBUG, filename='socks.log', filemode='a')
-    print 'switchysocksd'
+    format = '%(asctime)-15s %(name)s %(levelname)s %(message)s'
+    logging.basicConfig(level=logging.INFO,
+        # filename='socks.log', filemode='a'
+        format=format
+        )
+    print 'Listening on %s:%d' % (CONFIG['addr'], CONFIG['port'])
+    print 'Config:'
     pprint.pprint(CONFIG)
 
     server = TCPServer((CONFIG['addr'], CONFIG['port']), Socks5Handler)
