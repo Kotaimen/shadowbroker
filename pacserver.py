@@ -1,15 +1,16 @@
 #!/usr/bin/env python
-
-'''
+"""
 Created on Jan 13, 2014
 
 @author: kotaimen
-'''
-import flask
-from flask import Flask
+"""
+
 import json
 
-with open('config.json') as fp:
+from flask import Flask
+
+
+with open('config/shadowbroker.json') as fp:
     CONFIG = json.load(fp)
 
 app = Flask(__name__)

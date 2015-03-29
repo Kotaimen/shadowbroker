@@ -5,32 +5,61 @@ import socket
 import logging
 import json
 
-
-# apt-get install python-geoip
-# brew install libgeoip && pip install GeoIP
 import GeoIP
 
-
-#===============================================================================
+# ===============================================================================
 # Read data
-#===============================================================================
+# ===============================================================================
 
 # GeoIP2 seems doesn't work
 # Get GeoIP from
 # http://geolite.maxmind.com/download/geoip/database/GeoLiteCountry/GeoIP.dat.gz
 GEOIP_DB = GeoIP.open('data/GeoIP.dat', GeoIP.GEOIP_MEMORY_CACHE)
 
+
+def parse_gfwlist():
+    gfwlist = open('data/gfwlist.txt').read()
+    gfwlist = gfwlist.decode('base64')
+    for line in gfwlist:
+        if line.find('.*') >= 0:
+            continue
+        elif line.find('*') >= 0:
+            line = line.replace('*', '/')
+        if line.startswith('||'):
+            line = line.lstrip('||')
+        elif line.startswith('|'):
+            line = line.lstrip('|')
+        elif line.startswith('.'):
+            line = line.lstrip('.')
+        if line.startswith('!'):
+            continue
+        elif line.startswith('['):
+            continue
+        elif line.startswith('@'):
+            # ignore white list
+            continue
+        if '/' in line or '%' in line or ':' in line:
+            continue
+        line = line.strip()
+        if line:
+            yield line
+
+
 with open('data/ip_blacklist.txt') as fp:
     BLACKLIST_IP = frozenset(line.strip() for line in fp if line.strip())
 
 with open('data/domain_blacklist.txt') as fp:
-    BLACKLIST_DOMAIN = frozenset(line.strip() for line in fp if line.strip())
+    BLACKLIST_DOMAIN = list(line.strip() for line in fp if line.strip())
 
-WHITELIST_DOMAIN = frozenset(['local', 'localhost'])
+BLACKLIST_DOMAIN.extend(parse_gfwlist())
+BLACKLIST_DOMAIN = frozenset(BLACKLIST_DOMAIN)
 
-#===============================================================================
+with open('data/domain_whitelist.txt') as fp:
+    WHITELIST_DOMAIN = frozenset(line.strip() for line in fp if line.strip())
+
+# ===============================================================================
 # Magic variables
-#===============================================================================
+# ===============================================================================
 
 
 def ip2int(ip):
@@ -74,9 +103,9 @@ def is_host_gfwed(host):
     return host in BLACKLIST_DOMAIN
 
 
-#===============================================================================
+# ===============================================================================
 # Proxy Selector
-#===============================================================================
+# ===============================================================================
 
 
 def select_proxy(host):

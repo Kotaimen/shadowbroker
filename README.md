@@ -1,47 +1,42 @@
 Shadow Broker
 =============
 
-SOCKS5 Proxy.
-Forked from https://github.com/clowwindy/shadowsocks but heavily modified.
+A SOCKS5 proxy which selects backend according to predefined blacklists or 
+GeoIP.
 
-Still in progress of rewriting everything.
-This is slower than `sshuttle` but ssh tunnel is still most reliable.
+Install
+-------
 
-Usage
+Install binary dependency:
+    
+    apt-get install geoip gevent
+
+Clone the source, run:
+
+    pip install -rrequirements.txt
+
+Go into `data` directory and run:
+
+    ./download_data.sh
+
+This downloads the GeoIP database and gfw list.
+   
+
+Setup
 -----
 
-Prerequests (ubuntu):
-```
-apt-get install python-gevent python-geoip
-```
+Shadowbroker requires a "oversea" socks5 proxy up and running, the easiest is 
+use ssh:
 
-Prerequests (brew):
-```
-brew install geoip
-pip install gevent geoip
-```
+    ssh user@remote -D 127.0.0.1:1081 -g -N
 
-Clone, run `data/get_geoipdb.sh` to download GeoIP database.
+Add `-c blowfish` if you don't care safety, use `autossh` for stable 
+connections.
 
-Run ssh using:
-```
-ssh user@remote -D 127.0.0.1:1081 -g -N
-```
+Then run shadowbroker:
 
-Add `-c blowfish` if you don't care safety.
-
-Modify `config.json` as needed , note default listens on `127.0.0.1`.
-
-Run:
-
-```
-./shadowbroker.py
-```
+    ./shadowbroker.py
+    
+Point browser proxy to `1080` port
 
 Tested on ubuntu/mac/pi.
-
-Issues
---------
-
-- No logging/monitoring yet.
-- There is a eventlet branch which is runnable using pypy 2.2+, but it runs into "out of socket" error...

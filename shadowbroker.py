@@ -2,6 +2,7 @@
 
 import gevent
 import gevent.monkey
+
 gevent.monkey.patch_all()
 
 import json
@@ -13,19 +14,21 @@ import logging
 
 import pprint
 
-#===============================================================================
+# ===============================================================================
 # Config
-#===============================================================================
+# ===============================================================================
 
 import selectproxy
 
-CONFIG = json.load(open('config.json'))
+CONFIG = None
 
 
 def lookup_upstream(proxy):
-    return (CONFIG['upstreams'][proxy]['addr'], CONFIG['upstreams'][proxy]['port'])
+    return (
+    CONFIG['upstreams'][proxy]['addr'], CONFIG['upstreams'][proxy]['port'])
 
-#===============================================================================
+
+# ===============================================================================
 # Socks5
 #===============================================================================
 
@@ -42,7 +45,6 @@ def send_all(sock, data):
 
 
 class Socks5Handler(SocketServer.StreamRequestHandler):
-
     def handle(self):
         try:
             self.do_handle()
@@ -79,7 +81,7 @@ class Socks5Handler(SocketServer.StreamRequestHandler):
 
         reply = b"\x05\x00\x00\x01"
         logging.info('Accepted  %s:%d => %s:%d', client_address[0],
-                     client_address[1], addr, port[0],)
+                     client_address[1], addr, port[0], )
 
         # Open upstream
         remote = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -94,7 +96,8 @@ class Socks5Handler(SocketServer.StreamRequestHandler):
                              client_address[0], client_address[1],
                              proxy, local[0], local[1],
                              addr, port[0])
-                reply += socket.inet_aton(local[0]) + struct.pack(">H", local[1])
+                reply += socket.inet_aton(local[0]) + struct.pack(">H",
+                                                                  local[1])
                 sock.sendall(reply)
             else:
                 remote.connect(lookup_upstream(proxy))
@@ -103,13 +106,15 @@ class Socks5Handler(SocketServer.StreamRequestHandler):
                              client_address[0], client_address[1],
                              proxy, local[0], local[1],
                              addr, port[0])
-                reply += socket.inet_aton(local[0]) + struct.pack(">H", local[1])
+                reply += socket.inet_aton(local[0]) + struct.pack(">H",
+                                                                  local[1])
                 remote.sendall(b"\x05\x01\x00")
                 data = remote.recv(262)
                 if addrtype == 1:
                     tosend = b"\x05\x01\x00\x01" + socket.inet_aton(addr)
                 elif addrtype == 3:
-                    tosend = b"\x05\x01\x00\x03" + struct.pack('B', len(addr)) + bytes(addr)
+                    tosend = b"\x05\x01\x00\x03" + struct.pack('B', len(
+                        addr)) + bytes(addr)
                     tosend += struct.pack('>H', port[0])
                 remote.sendall(tosend)
                 data = remote.recv(262)
@@ -126,7 +131,8 @@ class Socks5Handler(SocketServer.StreamRequestHandler):
         except socket.error:
             logging.exception('Socket error while tranfering')
         else:
-            logging.info('Connection %s:%r closed, %d bytes read, %d bytes sent',
+            logging.info(
+                'Connection %s:%r closed, %d bytes read, %d bytes sent',
                 client_address[0], client_address[1],
                 total_read, total_sent)
         finally:
@@ -165,10 +171,12 @@ class TCPServer(SocketServer.ThreadingMixIn, SocketServer.TCPServer):
 
 
 def main():
+    global CONFIG
+    CONFIG = json.load(open('config/shadowbroker.json'))
+
     format = '%(asctime)-15s %(name)s %(levelname)s %(message)s'
     logging.basicConfig(level=logging.INFO,
-        filename='socks.log', filemode='a',
-        format=format)
+                        format=format)
 
     print 'Listening on %s:%d' % (CONFIG['addr'], CONFIG['port'])
     print 'Config:'
@@ -176,6 +184,7 @@ def main():
 
     server = TCPServer((CONFIG['addr'], CONFIG['port']), Socks5Handler)
     server.serve_forever()
+
 
 if __name__ == '__main__':
     main()

@@ -1,0 +1,16 @@
+local
+localhost
+aliyun.com
+baidu.com
+bing.com
+chinaso.com
+qq.com
+sina.cn
+sina.com.cn
+sogou.com
+so.com
+soso.com
+yahoo.cn
+youdao.com
+taobao.com
+jd.com

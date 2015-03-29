@@ -1,0 +1,14 @@
+{
+  "addr": "127.0.0.1",
+  "port": 1080,
+  "upstreams": {
+    "OVERSEA": {
+      "addr": "127.0.0.1",
+      "port": 1081
+    }
+  },
+  "pacserver": {
+    "addr": "127.0.0.1",
+    "port": 8000
+  }
+}
